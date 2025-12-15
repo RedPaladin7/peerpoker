@@ -35,23 +35,23 @@ func (gv GameVariant) String() string {
 }
 
 type ServerConfig struct {
-	Version string 
-	ListenAddr string 
-	APIListenAddr string 
-	GameVariant GameVariant 
-	MaxPlayers int 
+	Version 		string 
+	ListenAddr 		string 
+	APIListenAddr 	string 
+	GameVariant 	GameVariant 
+	MaxPlayers 		int 
 }
 
 type Server struct {
 	ServerConfig
-	transport *TCPTransport
-	peerLock sync.RWMutex
-	peers map[string]*Peer
-	addPeer chan *Peer
-	delPeer chan *Peer
-	msgch chan *Message
-	broadcastch chan BroadcastTo
-	// gameState *Game
+	transport 		*TCPTransport
+	peerLock 		sync.RWMutex
+	peers 			map[string]*Peer
+	addPeer 		chan *Peer
+	delPeer 		chan *Peer
+	msgch 			chan *Message
+	broadcastch 	chan BroadcastTo
+	gameState 		*Game
 }
 
 func NewServer(cfg ServerConfig) *Server {
@@ -59,14 +59,14 @@ func NewServer(cfg ServerConfig) *Server {
 		cfg.MaxPlayers = defaultMaxPlayers
 	}
 	s := &Server{
-		ServerConfig: cfg,
-		peers: make(map[string]*Peer),
-		addPeer: make(chan *Peer, 10),
-		delPeer: make(chan *Peer, 10),
-		msgch: make(chan *Message, 100),
-		broadcastch: make(chan BroadcastTo, 100),
+		ServerConfig: 	cfg,
+		peers: 			make(map[string]*Peer),
+		addPeer: 		make(chan *Peer, 10),
+		delPeer: 		make(chan *Peer, 10),
+		msgch: 			make(chan *Message, 100),
+		broadcastch: 	make(chan BroadcastTo, 100),
 	}
-	// s.gameState = NewGame(s.listenAdr, s.broadcastch)
+	s.gameState = NewGame(s.ListenAddr, s.broadcastch)
 	tr := NewTCPTransport(s.ListenAddr)
 	s.transport = tr 
 
@@ -201,7 +201,7 @@ func (s *Server) handleNewPeer(peer *Peer) error {
 		"outbound": peer.outbound,
 		"version": hs.Version,
 	})
-	// s.gameState.AddPlayer(peer.listenAddr)
+	s.gameState.AddPlayer(peer.listenAddr)
 	return nil
 
  }
@@ -217,7 +217,7 @@ func (s *Server) handleDelPeer(peer *Peer) {
 	logrus.WithFields(logrus.Fields{
 		"addr": addrToDelete,
 	}).Info("Peer disconnected and removed")
-	// s.gameState.RemovePlayer(addrToDelete)
+	s.gameState.RemovePlayer(addrToDelete)
 }
 
 func (s *Server) Broadcast(broadcastMsg BroadcastTo) error {
