@@ -240,16 +240,99 @@ func (g *Game) updatePlayerState(addr string, action PlayerAction, value int) {
 	}
 }
 
-// func (g *Game) advanceTurnAndCheckRoundEnd() {
-	
-// }
+func (g *Game) advanceTurnAndCheckRoundEnd() {
+	g.incNextPlayer()
+	if g.checkRoundEnd(){
+		g.advanceToNextRound()
+	}
+}
 
-// func (g *Game) incNextPlayer(){
-// 	startID := g.currentPlayerTurnID
-// 	for {
-// 		nextID := g.get
-// 	}
-// }
+func (g *Game) incNextPlayer(){
+	startID := g.currentPlayerTurnID
+	for {
+		nextID := g.getNextPlayerID(startID)
+		addr, ok := g.rotationMap[nextID]
+		if ok {
+			state := g.playerStates[addr]
+			if state.IsActive && !state.IsFolded{
+				g.currentPlayerTurnID = nextID
+				return 
+			}
+		}
+		startID = nextID
+		if startID == g.currentPlayerTurnID {
+			break
+		}
+	}
+}
+
+
+
+
+func (g *Game) getReadyPlayers() []string {
+	ready := []string{}
+	for _, state := range g.playerStates {
+		if state.IsReady {
+			ready = append(ready, state.ListenAddr)
+		}
+	}
+	return ready
+}
+
+func (g *Game) checkRoundEnd() bool {
+	activeCount := len(g.getReadyActivePlayers())
+	if activeCount <= 1{
+		return true
+	}
+	currentTurnAddr, ok := g.rotationMap[g.currentPlayerTurnID]
+	if !ok {
+		return false
+	}
+	currentPlayerState := g.playerStates[currentTurnAddr]
+	nextActiveIDAfterRaiser := g.getNextActivePlayerID(g.lastRaiserID)
+	if g.currentPlayerTurnID == nextActiveIDAfterRaiser {
+		if g.highestBet == 0{
+			return true
+		}
+		if currentPlayerState.CurrentRoundBet == g.highestBet {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *Game) advanceToNextRound() {
+	if GameStatus(g.currentStatus.Get()) == GameStatusShowdown || GameStatus(g.currentStatus.Get()) == GameStatusHandComplete {
+		logrus.Info("Hand is complete. Cleaning up and starting the next round.")
+		g.StartNewHand()
+		return 
+	}
+	g.highestBet = 0
+	for _, state := range g.playerStates {
+		state.CurrentRoundBet = 0
+	}
+	g.setStatus(g.getNextGameStatus())
+	g.currentPlayerTurnID = g.getNextActivePlayerID(g.currentDealerID)
+	logrus.Info("Advancing to next round: %s", GameStatus(g.currentStatus.Get()))
+}
+
+func (g *Game) getNextActivePlayerID(currentID int) int {
+	startID := currentID
+	for {
+		nextID := g.getNextPlayerID(startID)
+		addr, ok := g.rotationMap[nextID]
+		if ok {
+			state := g.playerStates[addr]
+			if state.IsActive && !state.IsFolded{
+				return nextID
+			}
+		}
+		startID = nextID
+		if startID == currentID {
+			return currentID
+		}
+	}
+}
 
 func (g *Game) getNextPlayerID(currentID int) int {
 	return (currentID + 1) & g.nextRotationID
@@ -263,16 +346,6 @@ func (g *Game) getReadyActivePlayers() []string {
 		}
 	}
 	return active
-}
-
-func (g *Game) getReadyPlayers() []string {
-	ready := []string{}
-	for _, state := range g.playerStates {
-		if state.IsReady {
-			ready = append(ready, state.ListenAddr)
-		}
-	}
-	return ready
 }
 
 func (g *Game) setStatus(s GameStatus) {
@@ -296,12 +369,29 @@ func (g *Game) sendToPlayers(payload any, addr ...string){
 	}
 }
 
-// func (g *Game) getOtherPlayers() []string {
-// 	players := []string{}
-// 	for _, addr := range g.playersList.List(){
+func (g *Game) getOtherPlayers() []string {
+	players := []string{}
+	for _, addr := range g.playersList.List(){
+		if addr == g.listenAddr{
+			continue
+		}
+		players = append(players, addr)
+	}
+	return players
+}
 
-// 	}
-// }
+func (g *Game) InitiateShuffleAndDeal(){
+	logrus.Info("Initiating shuffle and deal...")
+	dealToPlayerID := g.getNextPlayerID(g.currentDealerID)
+	dealToPlayerAddr := g.rotationMap[dealToPlayerID]
+	g.sendToPlayers(MessageEncDeck{Deck: [][]byte{}}, dealToPlayerAddr)
+	g.setStatus(GameStatusDealing)
+}
+
+func (g *Game) ShuffleAndEncrypt(from string, deck [][]byte) error {
+	logrus.Infof("Received and handling encrypted deck from %s", from)
+	return nil
+}
 
 func (g *Game) loop() {
 	ticker := time.NewTicker(time.Second * 5)
@@ -318,7 +408,7 @@ func (g *Game) loop() {
 			"highest-bet": g.highestBet,
 			"last-raised-ID": g.lastRaiserID,
 			"rotation-size": g.nextRotationID,
-			// "ready-active": len(g.getReadyActivePlayers()),
+			"ready-active": len(g.getReadyActivePlayers()),
 		}).Info("Game State Heartbeat")
 	}
 }
