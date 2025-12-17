@@ -167,16 +167,42 @@ func (g *Game) SetReady(from string) {
 		state.IsReady = true 
 	}
 
-	// g.sendToPlayers(MessageReady{}. g.getOtherPlayers()...)
-	// if len(g.getReadyPlayers()) >= 2 && GameStatus(g.currentStatus.Get()) == GameStatusWaiting {
-	// 	g.startNewHand()
-	// }
+	g.sendToPlayers(MessageReady{}, g.getOtherPlayers()...)
+	if len(g.getReadyPlayers()) >= 2 && GameStatus(g.currentStatus.Get()) == GameStatusWaiting {
+		g.StartNewHand()
+	}
 }
 
-// func (g *Game) StartNewHand() {
-// 	g.lock.Lock()
-// 	defer g.lock.Unlock()
-// }
+func (g *Game) StartNewHand() {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+
+	activeReadyPlayers := g.getReadyActivePlayers()
+	if len(activeReadyPlayers) < 2 {
+		g.setStatus(GameStatusWaiting)
+		logrus.Warnf("Not enough players to start a hand after cleanup")
+		return 
+	}
+	g.rotationMap = make(map[int]string)
+	g.nextRotationID = 0
+
+	sort.Strings(activeReadyPlayers)
+
+	for _, addr := range activeReadyPlayers{
+		state := g.playerStates[addr]
+		state.RotationID = g.nextRotationID
+		state.IsFolded = false 
+		state.CurrentRoundBet = 0
+		g.rotationMap[state.RotationID] = addr 
+		g.nextRotationID++
+	}
+	g.advanceDealer()
+	g.currentPot = 0
+	g.highestBet = 0
+	g.lastRaiserID = g.currentDealerID
+	g.setStatus(GameStatusDealing)
+	g.InitiateShuffleAndDeal()
+}
 
 func (g *Game) advanceDealer() {
 	if g.nextRotationID == 0 {
@@ -199,24 +225,37 @@ func (g *Game) advanceDealer() {
 	}
 }
 
-// func (g *Game) TakeAction(action PlayerAction, value int) error {
-// 	g.lock.Lock()
-// 	defer g.lock.Unlock()
+func (g *Game) TakeAction(action PlayerAction, value int) error {
+	g.lock.Lock()
+	defer g.lock.Unlock()
 
-// 	if g.playerStates[g.listenAddr].RotationID != g.currentPlayerTurnID {
-// 		return fmt.Errorf("it is not my turn to act: %s", g.listenAddr)
-// 	}
-// }
+	if g.playerStates[g.listenAddr].RotationID != g.currentPlayerTurnID {
+		return fmt.Errorf("it is not my turn to act: %s", g.listenAddr)
+	}
 
-// func (g *Game) handlePlayerAction(from string, msg MessagePlayerAction) error {
-// 	g.lock.Lock()
-// 	defer g.lock.Unlock()
+	g.updatePlayerState(g.listenAddr, action, value)
 
-// 	if g.playerStates[from].RotationID != g.currentPlayerTurnID {
-// 		return fmt.Errorf("player (%s) acting out of turn", from)
-// 	}
+	g.sendToPlayers(MessagePlayerAction{
+		Action: action,
+		CurrentGameStatus: GameStatus(g.currentStatus.Get()),
+		Value: value,
+	}, g.getOtherPlayers()...)
+	g.advanceTurnAndCheckRoundEnd()
+	return nil
+}
 
-// }
+func (g *Game) handlePlayerAction(from string, msg MessagePlayerAction) error {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+
+	if g.playerStates[from].RotationID != g.currentPlayerTurnID {
+		return fmt.Errorf("player (%s) acting out of turn", from)
+	}
+
+	g.updatePlayerState(from, msg.Action, msg.Value)
+	g.advanceTurnAndCheckRoundEnd()
+	return nil
+}
 
 func (g *Game) updatePlayerState(addr string, action PlayerAction, value int) {
 	state := g.playerStates[addr]
@@ -313,7 +352,7 @@ func (g *Game) advanceToNextRound() {
 	}
 	g.setStatus(g.getNextGameStatus())
 	g.currentPlayerTurnID = g.getNextActivePlayerID(g.currentDealerID)
-	logrus.Info("Advancing to next round: %s", GameStatus(g.currentStatus.Get()))
+	logrus.Infof("Advancing to next round: %s", GameStatus(g.currentStatus.Get()))
 }
 
 func (g *Game) getNextActivePlayerID(currentID int) int {

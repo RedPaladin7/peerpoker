@@ -299,7 +299,7 @@ func (s *Server) handleMessage(msg *Message) error {
 		case MessagePeerList:
 			return s.handlePeerList(v)
 		case MessageEncDeck:
-			// return s.gameState.ShuffleAndEncrypt(msg.From, v.Deck)
+			return s.gameState.ShuffleAndEncrypt(msg.From, v.Deck)
 			logrus.Infof("Received encrypted deck from %s", msg.From)
 		case MessageReady:
 			// return s.gameState.SetPlayerReady(msg.From)
