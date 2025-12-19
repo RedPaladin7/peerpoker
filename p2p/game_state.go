@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"fmt"
+	"math/big"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -111,9 +112,13 @@ type Game struct {
 	currentPlayerTurnID int 
 	highestBet 			int 
 	lastRaiserID 		int 
+	deckKeys 			*CardKeys
+	currentDeck 		[][]byte
 }
 
 func NewGame(addr string, bc chan BroadcastTo) *Game {
+	sharedPrime, _ := new(big.Int).SetString("C7970CEDCC5226685694605929849D3D", 16)
+	keys, _ := GenerateCardKeys(sharedPrime)
 	g := &Game{
 		playersList: 	NewPlayersList(),
 		broadcastch: 	bc,
@@ -121,6 +126,7 @@ func NewGame(addr string, bc chan BroadcastTo) *Game {
 		currentStatus: 	NewAtomicInt(int32(GameStatusWaiting)),
 		playerStates: 	make(map[string]*PlayerState),
 		rotationMap: 	make(map[int]string),
+		deckKeys: keys,
 	}
 	g.playersList.add(addr)
 	g.playerStates[addr] = &PlayerState{ListenAddr: addr, IsActive: true}
@@ -350,9 +356,19 @@ func (g *Game) advanceToNextRound() {
 	for _, state := range g.playerStates {
 		state.CurrentRoundBet = 0
 	}
-	g.setStatus(g.getNextGameStatus())
+	newStatus := g.getNextGameStatus()
+	g.setStatus(newStatus)
+	communityIndices := []int{}
+	if newStatus == GameStatusFlop {
+		start := len(g.getReadyActivePlayers()) * 2
+		communityIndices = []int{start, start+1, start+2}
+	}
+	g.sendToPlayers(MessageGameState{
+		Status: newStatus,
+		CommunityCards: communityIndices,
+	}, g.getOtherPlayers()...)
 	g.currentPlayerTurnID = g.getNextActivePlayerID(g.currentDealerID)
-	logrus.Infof("Advancing to next round: %s", GameStatus(g.currentStatus.Get()))
+	logrus.Infof("Advancing to next round: %s", newStatus)
 }
 
 func (g *Game) getNextActivePlayerID(currentID int) int {
@@ -420,15 +436,65 @@ func (g *Game) getOtherPlayers() []string {
 }
 
 func (g *Game) InitiateShuffleAndDeal(){
-	logrus.Info("Initiating shuffle and deal...")
-	dealToPlayerID := g.getNextPlayerID(g.currentDealerID)
-	dealToPlayerAddr := g.rotationMap[dealToPlayerID]
-	g.sendToPlayers(MessageEncDeck{Deck: [][]byte{}}, dealToPlayerAddr)
-	g.setStatus(GameStatusDealing)
+	logrus.Info("Starting mental poker shuffle cycle...")
+	deck := CreatePlaceHolderDeck()
+	encryptedDeck := g.shuffleAndEncrypt(deck)
+
+	nextPlayerAddr := g.rotationMap[g.getNextPlayerID(g.currentDealerID)]
+	g.sendToPlayers(MessageShuffleStatus{Deck: encryptedDeck}, nextPlayerAddr)
+}
+
+func (g *Game) shuffleAndEncrypt(deck [][]byte) [][]byte  {
+	newDeck := make([][]byte, len(deck))
+	for i, card := range deck {
+		newDeck[i] = g.deckKeys.Encrypt(card)
+	}
+	for i := len(newDeck) - 1; i > 0; i-- {
+		j := time.Now().UnixNano() % int64(i+1)
+		newDeck[i], newDeck[j] = newDeck[j], newDeck[i]
+	}
+	return newDeck
 }
 
 func (g *Game) ShuffleAndEncrypt(from string, deck [][]byte) error {
-	logrus.Infof("Received and handling encrypted deck from %s", from)
+	g.lock.Lock()
+	g.lock.Unlock()
+
+	if g.listenAddr == g.rotationMap[g.currentDealerID]{
+		logrus.Info("Deck fully encrypted by all players. Starting Pre-Flop.")
+		g.currentDeck = deck 
+		g.setStatus(GameStatusPreFlop)
+		g.sendToPlayers(MessageGameState{
+			Status: GameStatusPreFlop,
+			CommunityCards: []int{},
+		}, g.getOtherPlayers()...)
+		return nil
+	}
+	logrus.Infof("Received deck from %s, encrypting and passing on...", from)
+	nextDeck := g.shuffleAndEncrypt(deck)
+	myRotationID := g.playerStates[g.listenAddr].RotationID
+	nextPlayerAddr := g.rotationMap[g.getNextPlayerID(myRotationID)]
+	g.sendToPlayers(MessageShuffleStatus{Deck: nextDeck}, nextPlayerAddr)
+	return nil
+}
+
+func (g *Game) SyncState(msg MessageGameState) error {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+
+	logrus.Infof("Syncing game state: %s", msg.Status)
+	g.setStatus(msg.Status)
+	g.highestBet = 0
+	g.lastRaiserID = g.currentDealerID 
+	for _, state := range g.playerStates {
+		state.CurrentRoundBet = 0
+	}
+	if msg.Status == GameStatusPreFlop {
+		go g.revealMyHoleCards()
+	}
+	if len(msg.CommunityCards) > 0 {
+		go g.revealCommunityCards(msg.CommunityCards)
+	}
 	return nil
 }
 

@@ -1,0 +1,76 @@
+// // MessageGetRPC is a request to another player to partially decrypt a set of cards.
+// type MessageGetRPC struct {
+// 	CardIndices []int    // The indices in the deck the player wants to see
+// 	EncryptedData [][]byte // The actual encrypted bytes for those indices
+// }
+
+// // MessageRPCResponse is the response containing the partially decrypted data.
+// type MessageRPCResponse struct {
+// 	DecryptedData [][]byte
+// }
+
+// // Don't forget to register these in init()
+// // gob.Register(MessageGetRPC{})
+// // gob.Register(MessageRPCResponse{})
+
+// // revealMyHoleCards handles the flow for a player to see their own two cards.
+// func (g *Game) revealMyHoleCards() {
+// 	indices := g.getMyHoleCardIndices()
+// 	encryptedCards := [][]byte{
+// 		g.currentDeck[indices[0]],
+// 		g.currentDeck[indices[1]],
+// 	}
+
+// 	logrus.Infof("Requesting decryption for hole cards at indices %v", indices)
+	
+// 	// In a real implementation, you would send MessageGetRPC to everyone,
+// 	// collect the responses, and then apply your own DecryptionKey last.
+// 	// For now, we will trigger the broadcast.
+// 	g.sendToPlayers(MessageGetRPC{
+// 		CardIndices:   indices,
+// 		EncryptedData: encryptedCards,
+// 	}, g.getOtherPlayers()...)
+// }
+
+// // revealCommunityCards handles the flow for revealing shared cards (Flop, Turn, River).
+// func (g *Game) revealCommunityCards(indices []int) {
+// 	encryptedCards := make([][]byte, len(indices))
+// 	for i, idx := range indices {
+// 		encryptedCards[i] = g.currentDeck[idx]
+// 	}
+
+// 	logrus.Infof("Requesting decryption for community cards at indices %v", indices)
+	
+// 	g.sendToPlayers(MessageGetRPC{
+// 		CardIndices:   indices,
+// 		EncryptedData: encryptedCards,
+// 	}, g.getOtherPlayers()...)
+// }
+
+// // HandleRPCRequest is called when a peer asks us to decrypt a card for them.
+// func (g *Game) HandleRPCRequest(from string, msg MessageGetRPC) error {
+// 	g.lock.RLock()
+// 	defer g.lock.RUnlock()
+
+// 	decryptedData := make([][]byte, len(msg.EncryptedData))
+// 	for i, data := range msg.EncryptedData {
+// 		// Use the private DecryptionKey from crypto.go
+// 		decryptedData[i] = g.deckKeys.Decrypt(data)
+// 	}
+
+// 	logrus.Infof("Providing partial decryption to %s for indices %v", from, msg.CardIndices)
+
+// 	// Send the partial decryptions back to the requester
+// 	g.sendToPlayers(MessageRPCResponse{
+// 		DecryptedData: decryptedData,
+// 	}, from)
+
+// 	return nil
+// }
+
+// // HandleRPCResponse would collect responses. 
+// // Logic Note: You need a way to track how many responses you've received for a specific card.
+// // Once len(responses) == len(players)-1:
+// // 1. FinalCard = myKeys.Decrypt(partiallyDecryptedResult)
+// // 2. cardObj = NewCardFromByte(FinalCard[0])
+// // 3. Log: "My Hole Cards are: Ace of Spades and Jack of Hearts"

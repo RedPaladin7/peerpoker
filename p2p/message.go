@@ -43,8 +43,15 @@ type MessageEncDeck struct {
 	Deck [][]byte
 }
 
-type MessagePreFlop struct{}
+type MessageGameState struct {
+	Status GameStatus
+	CommunityCards []int
+}
 
-func (msg MessagePreFlop) String() string {
-	return "MSG: PREFLOP"
+type MessagePreShuffle struct {
+	Deck [][]byte
+}
+
+type MessageShuffleStatus struct {
+	Deck [][]byte
 }

@@ -1,2 +1,2 @@
-- Game state additions in the server file
-- Continue on the handle new peer function
+- Add logic for river, turn and showdown, along with the flop logic, in advance to next round function
+- Write the sync state function
