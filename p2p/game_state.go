@@ -263,7 +263,7 @@ func (g *Game) ShuffleAndEncrypt(from string, deck [][]byte) error {
 			Status: GameStatusPreFlop,
 			CommunityCards: []int{},
 		}, g.getOtherPlayers()...)
-		go g.revealMyHoleCards()
+		g.SyncState(MessageGameState{Status: GameStatusPreFlop})
 		return nil
 	}
 	nextDeck := g.shuffleAndEncrypt(deck)
@@ -477,110 +477,118 @@ func (g *Game) checkRoundEnd() bool {
 	return false
 }
 
-// func (g *Game) TakeAction(action PlayerAction, value int) error {
-// 	g.lock.Lock()
-// 	defer g.lock.Unlock()
+func (g *Game) TakeAction(action PlayerAction, value int) error {
+	g.lock.Lock()
+	defer g.lock.Unlock()
 
-// 	if g.playerStates[g.listenAddr].RotationID != g.currentPlayerTurnID {
-// 		return fmt.Errorf("it is not my turn to act: %s", g.listenAddr)
-// 	}
+	if g.playerStates[g.listenAddr].RotationID != g.currentPlayerTurnID {
+		return fmt.Errorf("it is not my turn to act: %s", g.listenAddr)
+	}
 
-// 	g.updatePlayerState(g.listenAddr, action, value)
+	g.updatePlayerState(g.listenAddr, action, value)
 
-// 	g.sendToPlayers(MessagePlayerAction{
-// 		Action: action,
-// 		CurrentGameStatus: GameStatus(g.currentStatus.Get()),
-// 		Value: value,
-// 	}, g.getOtherPlayers()...)
-// 	g.advanceTurnAndCheckRoundEnd()
-// 	return nil
-// }
+	g.sendToPlayers(MessagePlayerAction{
+		Action: action,
+		CurrentGameStatus: GameStatus(g.currentStatus.Get()),
+		Value: value,
+	}, g.getOtherPlayers()...)
+	g.advanceTurnAndCheckRoundEnd()
+	return nil
+}
 
-// func (g *Game) handlePlayerAction(from string, msg MessagePlayerAction) error {
-// 	g.lock.Lock()
-// 	defer g.lock.Unlock()
+func (g *Game) handlePlayerAction(from string, msg MessagePlayerAction) error {
+	g.lock.Lock()
+	defer g.lock.Unlock()
 
-// 	if g.playerStates[from].RotationID != g.currentPlayerTurnID {
-// 		return fmt.Errorf("player (%s) acting out of turn", from)
-// 	}
+	if g.playerStates[from].RotationID != g.currentPlayerTurnID {
+		return fmt.Errorf("player (%s) acting out of turn", from)
+	}
 
-// 	g.updatePlayerState(from, msg.Action, msg.Value)
-// 	g.advanceTurnAndCheckRoundEnd()
-// 	return nil
-// }
+	g.updatePlayerState(from, msg.Action, msg.Value)
+	g.advanceTurnAndCheckRoundEnd()
+	return nil
+}
 
-// func (g *Game) getReadyPlayers() []string {
-// 	ready := []string{}
-// 	for _, state := range g.playerStates {
-// 		if state.IsReady {
-// 			ready = append(ready, state.ListenAddr)
-// 		}
-// 	}
-// 	return ready
-// }
+func (g *Game) advanceToNextRound() {
+	if GameStatus(g.currentStatus.Get()) == GameStatusShowdown || GameStatus(g.currentStatus.Get()) == GameStatusHandComplete {
+		logrus.Info("Hand is complete. Cleaning up and starting the next round.")
+		g.StartNewHand()
+		return 
+	}
+	g.highestBet = 0
+	for _, state := range g.playerStates {
+		state.CurrentRoundBet = 0
+	}
+	newStatus := g.getNextGameStatus()
+	g.setStatus(newStatus)
+	communityIndices := []int{}
+	numPlayers := len(g.getReadyActivePlayers())
+	switch newStatus {
+	case GameStatusFlop:
+		start := numPlayers * 2
+		communityIndices = []int{start, start+1, start+2}
+	case GameStatusTurn:
+		communityIndices = []int{numPlayers*2 + 3}
+	case GameStatusRiver:
+		communityIndices = []int{numPlayers*2 + 4}
+	}
+	g.sendToPlayers(MessageGameState{
+		Status: newStatus,
+		CommunityCards: communityIndices,
+	}, g.getOtherPlayers()...)
+	g.currentPlayerTurnID = g.getNextActivePlayerID(g.currentDealerID)
+	logrus.Infof("Advancing to next round: %s", newStatus)
+}
 
-// func (g *Game) advanceToNextRound() {
-// 	if GameStatus(g.currentStatus.Get()) == GameStatusShowdown || GameStatus(g.currentStatus.Get()) == GameStatusHandComplete {
-// 		logrus.Info("Hand is complete. Cleaning up and starting the next round.")
-// 		g.StartNewHand()
-// 		return 
-// 	}
-// 	g.highestBet = 0
-// 	for _, state := range g.playerStates {
-// 		state.CurrentRoundBet = 0
-// 	}
-// 	newStatus := g.getNextGameStatus()
-// 	g.setStatus(newStatus)
-// 	communityIndices := []int{}
-// 	if newStatus == GameStatusFlop {
-// 		start := len(g.getReadyActivePlayers()) * 2
-// 		communityIndices = []int{start, start+1, start+2}
-// 	}
-// 	g.sendToPlayers(MessageGameState{
-// 		Status: newStatus,
-// 		CommunityCards: communityIndices,
-// 	}, g.getOtherPlayers()...)
-// 	g.currentPlayerTurnID = g.getNextActivePlayerID(g.currentDealerID)
-// 	logrus.Infof("Advancing to next round: %s", newStatus)
-// }
+// #####################################
+// HELPER - FUNCTIONS
+// #####################################
 
-// func (g *Game) getNextActivePlayerID(currentID int) int {
-// 	startID := currentID
-// 	for {
-// 		nextID := g.getNextPlayerID(startID)
-// 		addr, ok := g.rotationMap[nextID]
-// 		if ok {
-// 			state := g.playerStates[addr]
-// 			if state.IsActive && !state.IsFolded{
-// 				return nextID
-// 			}
-// 		}
-// 		startID = nextID
-// 		if startID == currentID {
-// 			return currentID
-// 		}
-// 	}
-// }
+func (g *Game) getNextActivePlayerID(currentID int) int {
+	startID := currentID
+	for {
+		nextID := g.getNextPlayerID(startID)
+		addr, ok := g.rotationMap[nextID]
+		if ok {
+			state := g.playerStates[addr]
+			if state.IsActive && !state.IsFolded{
+				return nextID
+			}
+		}
+		startID = nextID
+		if startID == currentID {
+			return currentID
+		}
+	}
+}
 
+func (g *Game) setStatus(s GameStatus) {
+	g.currentStatus.Set(int32(s))
+}
 
+func (g *Game) getNextGameStatus() GameStatus {
+	switch GameStatus(g.currentStatus.Get()){
+	case GameStatusPreFlop: return GameStatusFlop
+	case GameStatusFlop: 	return GameStatusTurn
+	case GameStatusTurn: 	return GameStatusRiver
+	case GameStatusRiver: 	return GameStatusShowdown
+	default: 				return GameStatusHandComplete
+	}
+}
 
-// func (g *Game) setStatus(s GameStatus) {
-// 	g.currentStatus.Set(int32(s))
-// }
+func (g *Game) sendToPlayers(payload any, addr ...string){
+	g.broadcastch <- BroadcastTo{
+		To: addr,
+		Payload: payload,
+	}
+}
 
-// func (g *Game) getNextGameStatus() GameStatus {
-// 	switch GameStatus(g.currentStatus.Get()){
-// 	case GameStatusPreFlop: return GameStatusFlop
-// 	case GameStatusFlop: return GameStatusTurn
-// 	case GameStatusTurn: return GameStatusRiver
-// 	case GameStatusRiver: return GameStatusShowdown
-// 	default: return GameStatusHandComplete
-// 	}
-// }
-
-// func (g *Game) sendToPlayers(payload any, addr ...string){
-// 	g.broadcastch <- BroadcastTo{
-// 		To: addr,
-// 		Payload: payload,
-// 	}
-// }
+func (g *Game) getReadyPlayers() []string {
+	ready := []string{}
+	for _, state := range g.playerStates {
+		if state.IsReady {
+			ready = append(ready, state.ListenAddr)
+		}
+	}
+	return ready
+}

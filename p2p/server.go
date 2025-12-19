@@ -310,7 +310,7 @@ func (s *Server) handleMessage(msg *Message) error {
 		case MessageGetRPC: 
 			return s.gameState.HandleRPCRequest(msg.From, v)
 		case MessageRPCResponse:
-			s.gameState.HandleRPCResponse(msg.From, v, v.CardIndices)
+			s.gameState.HandleRPCResponse(msg.From, v)
 		default:
 			logrus.Warnf("Received unhandled message type from %s", msg.From)
 	}
