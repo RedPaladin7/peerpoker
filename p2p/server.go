@@ -307,6 +307,10 @@ func (s *Server) handleMessage(msg *Message) error {
 		case MessageGameState:
 			logrus.Infof("Game moving to phase: %s", v.Status)
 			return s.gameState.SyncState(v)
+		case MessageGetRPC: 
+			return s.gameState.HandleRPCRequest(msg.From, v)
+		case MessageRPCResponse:
+			s.gameState.HandleRPCResponse(msg.From, v, v.CardIndices)
 		default:
 			logrus.Warnf("Received unhandled message type from %s", msg.From)
 	}
@@ -345,4 +349,6 @@ func init() {
 	gob.Register(MessageGameState{})
 	gob.Register(MessagePreShuffle{})
 	gob.Register(MessageShuffleStatus{})
+	gob.Register(MessageGetRPC{})
+	gob.Register(MessageRPCResponse{})
 }

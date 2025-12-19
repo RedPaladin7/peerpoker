@@ -55,3 +55,14 @@ type MessagePreShuffle struct {
 type MessageShuffleStatus struct {
 	Deck [][]byte
 }
+
+type MessageGetRPC struct {
+	CardIndices []int 
+	EncryptedData [][]byte
+	OriginalOwner string
+}
+
+type MessageRPCResponse struct {
+	CardIndices []int
+	DecryptedData [][]byte
+}
