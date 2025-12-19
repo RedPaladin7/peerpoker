@@ -74,8 +74,8 @@ func NewServer(cfg ServerConfig) *Server {
 	tr.DelPeer = s.delPeer
 
 	go func(s *Server){
-		// apiServer := NewAPIServer(cfg.APIListenAddr, &Game{})
-		// apiServer.Run()
+		apiServer := NewAPIServer(cfg.APIListenAddr, s.gameState)
+		apiServer.Run()
 		logrus.WithFields(logrus.Fields{
 			"listenAddr": cfg.APIListenAddr,
 		}).Info("API Server Placeholder running")
@@ -200,7 +200,7 @@ func (s *Server) handleNewPeer(peer *Peer) error {
 		"peer_addr": peer.listenAddr,
 		"outbound": peer.outbound,
 		"version": hs.Version,
-	})
+	}).Info("handshake successful")
 	s.gameState.AddPlayer(peer.listenAddr)
 	return nil
 
@@ -299,21 +299,38 @@ func (s *Server) handleMessage(msg *Message) error {
 		case MessagePeerList:
 			return s.handlePeerList(v)
 		case MessageEncDeck:
-			return s.gameState.ShuffleAndEncrypt(msg.From, v.Deck)
-			logrus.Infof("Received encrypted deck from %s", msg.From)
+			return s.handleMsgEncDeck(msg.From, v)
 		case MessageReady:
-			// return s.gameState.SetPlayerReady(msg.From)
-			logrus.Infof("Received ready status from %s", msg.From)
-		case MessagePreFlop:
-			// return s.gameState.SetStatus(GameStatusPreFlop)
-			logrus.Infof("Received preflop signal from %s", msg.From)
+			return s.handleMsgReady(msg.From)
 		case MessagePlayerAction:
-			// return s.gameState.handlePlayerAction(msg.From, v)
-			logrus.Infof("Recieved player action from %s: %s value %s", msg.From, v.Action, v.Value)
+			return s.handleMsgPlayerAction(msg.From, v)
 		default:
 			logrus.Warnf("Received unhandled message type from %s", msg.From)
 	}
 	return nil
+}
+
+func (s *Server) handleMsgPlayerAction(from string, msg MessagePlayerAction) error {
+	logrus.WithFields(logrus.Fields{
+		"we": s.ListenAddr,
+		"from": from,
+		"action": msg.Action,
+	}).Info("Received player action")
+	return s.gameState.handlePlayerAction(from, msg)
+}
+
+func (s *Server) handleMsgReady(from string) error {
+	logrus.Infof("Player %s is ready", from)
+	s.gameState.SetReady(from)
+	return nil
+}
+
+func (s *Server) handleMsgEncDeck(from string, msg MessageEncDeck) error {
+	logrus.WithFields(logrus.Fields{
+		"we": s.ListenAddr,
+		"from": from,
+	}).Info("Received encrypted deck")
+	return s.gameState.ShuffleAndEncrypt(from, msg.Deck)
 }
 
 func init() {
