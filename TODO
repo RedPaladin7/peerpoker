@@ -1,2 +1,1 @@
-- revisit game state to check the need for the take action function
-- go g.revealMyHoleCards() function is called, recheck the logic
+- refactor handle get table functions in api.go

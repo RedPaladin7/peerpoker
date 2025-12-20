@@ -11,6 +11,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const (
+	SmallBlind = 10
+	BigBlind = 20
+)
+
 // #####################################
 // UTILITY - STRUCTURES
 // #####################################
@@ -88,6 +93,8 @@ type PlayerState struct {
 	IsActive 		bool 
 	IsFolded 		bool 
 	CurrentRoundBet int
+	IsAllIn 		bool 
+	Stack 			int
 }
 
 type Game struct {
@@ -129,6 +136,21 @@ func NewGame(addr string, bc chan BroadcastTo) *Game {
 
 	go g.loop()
 	return g
+}
+
+func (g *Game) postBlinds() {
+	sbID := g.getNextActivePlayerID(g.currentDealerID)
+	sbAddr := g.rotationMap[sbID]
+	g.updatePlayerState(sbAddr, PlayerActionBet, SmallBlind)
+	logrus.Infof("Player %s posted small blind: %d", sbAddr, SmallBlind)
+
+	bbID := g.getNextActivePlayerID(sbID)
+	bbAddr := g.rotationMap[bbID]
+	g.updatePlayerState(bbAddr, PlayerActionBet, BigBlind)
+	logrus.Infof("Player %s posted big blind: %d", bbAddr, BigBlind)
+
+	g.currentPlayerTurnID = g.getNextActivePlayerID(bbID)
+	g.lastRaiserID = bbID
 }
 
 func (g *Game) AddPlayer(addr string) {
@@ -200,6 +222,7 @@ func (g *Game) StartNewHand() {
 		g.nextRotationID++
 	}
 	g.advanceDealer()
+	g.postBlinds()
 	g.currentPot = 0
 	g.highestBet = 0
 	g.lastRaiserID = g.currentDealerID
@@ -425,16 +448,30 @@ func (g *Game) updatePlayerState(addr string, action PlayerAction, value int) {
 	case PlayerActionFold:
 		state.IsFolded = true
 	case PlayerActionBet, PlayerActionRaise:
-		state.CurrentRoundBet += value 
-		g.currentPot += value 
+		actualBet := value 
+		if actualBet > state.Stack {
+			actualBet = state.Stack
+			state.IsAllIn = true 
+			logrus.Infof("Player %s is ALL-IN!", addr)
+		}
+		state.CurrentRoundBet += actualBet
+		g.currentPot += actualBet
+		state.Stack -= actualBet 
 		if state.CurrentRoundBet > g.highestBet {
 			g.highestBet = state.CurrentRoundBet
 			g.lastRaiserID = state.RotationID
 		}
 	case PlayerActionCall:
-		diff := g.highestBet - state.CurrentRoundBet
-		state.CurrentRoundBet += diff
-		g.currentPot += diff
+		amountNeeded := g.highestBet - state.CurrentRoundBet
+		actualCall := amountNeeded
+		if actualCall > state.Stack {
+			actualCall = state.Stack 
+			state.IsAllIn = true 
+			logrus.Infof("Player %s is ALL-IN!", addr)
+		}
+		state.CurrentRoundBet += actualCall
+		g.currentPot += actualCall
+		state.Stack -= actualCall
 	case PlayerActionCheck:
 		// no change in state
 	}
@@ -447,17 +484,20 @@ func (g *Game) advanceTurnAndCheckRoundEnd() {
 	}
 }
 
-func (g *Game) incNextPlayer(){
+func (g *Game) incNextPlayer() {
 	startID := g.currentPlayerTurnID
 	for {
 		nextID := g.getNextPlayerID(startID)
 		addr := g.rotationMap[nextID]
-		if state, ok := g.playerStates[addr]; ok && state.IsActive && !state.IsFolded {
+		state, ok := g.playerStates[addr]
+		if ok && !state.IsFolded && !state.IsAllIn {
 			g.currentPlayerTurnID = nextID
 			return 
 		}
-		startID = nextID
-		if startID == g.currentPlayerTurnID {break}
+		startID = nextID 
+		if startID == g.currentPlayerTurnID {
+			break
+		}
 	}
 }
 
@@ -477,6 +517,19 @@ func (g *Game) checkRoundEnd() bool {
 	return false
 }
 
+func (g *Game) getValidActions() []PlayerAction {
+	state := g.playerStates[g.listenAddr]
+	actions := []PlayerAction{PlayerActionFold}
+	if g.highestBet == 0 || state.CurrentRoundBet == g.highestBet {
+		actions = append(actions, PlayerActionCheck)
+	}
+	if g.highestBet > state.CurrentRoundBet {
+		actions = append(actions, PlayerActionCall)
+	}
+	actions = append(actions, PlayerActionRaise)
+	return actions
+}
+
 func (g *Game) TakeAction(action PlayerAction, value int) error {
 	g.lock.Lock()
 	defer g.lock.Unlock()
@@ -484,9 +537,20 @@ func (g *Game) TakeAction(action PlayerAction, value int) error {
 	if g.playerStates[g.listenAddr].RotationID != g.currentPlayerTurnID {
 		return fmt.Errorf("it is not my turn to act: %s", g.listenAddr)
 	}
-
+	valid := false 
+	for _, a := range g.getValidActions() {
+		if a == action {
+			valid = true 
+			break
+		}
+	}
+	if !valid {
+		return fmt.Errorf("illegal action: you cannot %s right now", action)
+	}
+	if action == PlayerActionRaise && value < (g.highestBet*2){
+		return fmt.Errorf("raise must be at least double the current bet")
+	}
 	g.updatePlayerState(g.listenAddr, action, value)
-
 	g.sendToPlayers(MessagePlayerAction{
 		Action: action,
 		CurrentGameStatus: GameStatus(g.currentStatus.Get()),
@@ -591,4 +655,70 @@ func (g *Game) getReadyPlayers() []string {
 		}
 	}
 	return ready
+}
+
+// #####################################
+// SHOWDOWN - LOGIC
+// #####################################
+
+func (g *Game) DetermineWinner() {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+
+	// bestRank := int32(9999)
+	// var winnerAddr string 
+	// var winnerHandName string 
+
+	rank, handName := EvaluateBestHand(g.myHand, g.communityCards)
+	logrus.Infof("Showdown: Your hand is %s (Rank: %d)", handName, rank)
+}
+
+// #####################################
+// GETTER - FUNCTIONS
+// #####################################
+
+func (g *Game) GetStatus() GameStatus {
+	return GameStatus(g.currentStatus.Get())
+}
+
+func (g *Game) GetPlayerHand() []Card {
+	g.lock.RLock()
+	defer g.lock.RUnlock()
+	return g.myHand
+}
+
+func (g *Game) GetCommunityCards() []Card {
+	g.lock.RLock()
+	defer g.lock.RUnlock()
+	return g.communityCards
+}
+
+func (g *Game) GetCurrentPot() int {
+	g.lock.RLock()
+	defer g.lock.RUnlock()
+	return g.currentPot
+}
+
+func (g *Game) GetHighestBet() int {
+	g.lock.RLock()
+	defer g.lock.RUnlock()
+	return g.highestBet
+}
+
+func (g *Game) IsMyTurn() bool {
+	g.lock.RLock()
+	defer g.lock.RUnlock()
+	return g.playerStates[g.listenAddr].RotationID == g.currentPlayerTurnID
+}
+
+func (g *Game) GetMyStack() int {
+	g.lock.RLock()
+	defer g.lock.RUnlock()
+	return g.playerStates[g.listenAddr].Stack
+}
+
+func (g *Game) GetCurrentTurnID() int {
+	g.lock.RLock()
+	defer g.lock.RUnlock()
+	return g.currentPlayerTurnID
 }

@@ -46,8 +46,25 @@ func (s *APIServer) Run() {
 	r.HandleFunc("/call", makeHTTPHandlerFunc(s.handlePlayerCall)).Methods("GET")
 	r.HandleFunc("/bet/{value}", makeHTTPHandlerFunc(s.handlePlayerBet)).Methods("GET")
 	r.HandleFunc("/raise/{value}", makeHTTPHandlerFunc(s.handlePlayerRaise)).Methods("GET")
+	r.HandleFunc("/table", makeHTTPHandlerFunc(s.handleGetTable)).Methods("GET")
 
 	http.ListenAndServe(s.listenAddr, r)
+}
+
+func (s *APIServer) handleGetTable(w http.ResponseWriter, r *http.Request) error {
+	validActions := s.game.getValidActions()
+	resp := map[string]any{
+		"status": 			s.game.currentStatus.Get(),
+		"my_hand":			s.game.GetPlayerHand(),
+		"community_cards": 	s.game.GetCommunityCards(),
+		"pot": 				s.game.GetCurrentPot(),
+		"highest_bet": 		s.game.GetHighestBet(),
+		"valid_actions": 	validActions,
+		"is_my_turn": 		s.game.IsMyTurn(),
+		"my_stack": 		s.game.GetMyStack(),
+		"current_turn_id": 	s.game.GetCurrentTurnID(),
+	}
+	return JSON(w, http.StatusOK, resp)
 }
 
 func (s *APIServer) handlePlayerReady(w http.ResponseWriter, r *http.Request) error {
