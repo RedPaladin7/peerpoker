@@ -112,6 +112,8 @@ type Game struct {
 	highestBet 			int 
 	lastRaiserID 		int 
 	deckKeys 			*CardKeys
+	foldedPlayerKeys 	map[string]*CardKeys
+	revealedKeys 		map[string]*CardKeys
 	currentDeck 		[][]byte
 	myHand 				[]Card
 	communityCards 		[]Card
@@ -128,6 +130,8 @@ func NewGame(addr string, bc chan BroadcastTo) *Game {
 		playerStates: 			make(map[string]*PlayerState),
 		rotationMap: 			make(map[int]string),
 		deckKeys: 				keys,
+		foldedPlayerKeys: 		make(map[string]*CardKeys),
+		revealedKeys: 			make(map[string]*CardKeys),
 		myHand: 				make([]Card, 0, 2),
 		communityCards: 		make([]Card, 0, 5),			
 	}
@@ -314,6 +318,14 @@ func (g *Game) SyncState(msg MessageGameState) error {
 	return nil
 }
 
+func (g *Game) HandleFoldKeyReveal(from string, msg MessageRevealKeys) {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+
+	g.foldedPlayerKeys[from] = msg.Keys 
+	logrus.Infof("Received keys from folded player %s", from)
+}
+
 func (g *Game) revealMyHoleCards() {
 	indices := g.getMyHoleCardIndices()
 	myID := g.playerStates[g.listenAddr].RotationID
@@ -386,6 +398,75 @@ func (g *Game) HandleRPCResponse(from string, msg MessageRPCResponse) {
 			g.communityCards = append(g.communityCards, card)
 			logrus.Infof("!!! COMMUNITY CARD REVEALED: %s !!!", card.String())
 		}
+	}
+}
+
+// #####################################
+// SHOWDOWN - LOGIC 
+// #####################################
+
+func (g *Game) InitiateShowdown() {
+	logrus.Info("!!! SHOWDOWN REACHED: Broadcasting Private Keys !!!")
+	g.sendToPlayers(MessageRevealKeys{
+		Keys: g.deckKeys,
+	}, g.getOtherPlayers()...)
+	g.lock.Lock()
+	g.revealedKeys[g.listenAddr] = g.deckKeys
+	g.lock.Unlock()
+}
+
+func (g *Game) ResolveWinner() {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+	activePlayers := g.getReadyActivePlayers()
+	var winnerAddr string 
+	var bestRank int32 = 999999
+	var bestHandName string 
+
+	for _, playerAddr := range activePlayers {
+		state := g.playerStates[playerAddr]
+		if state.IsFolded {continue}
+		indices := []int{state.RotationID * 2, (state.RotationID * 2) + 1}
+		playerHand := []Card{}
+		for _, cardIdx := range indices {
+			encryptedCard := g.currentDeck[cardIdx]
+			decryptedBytes := encryptedCard
+			for _, keys := range g.revealedKeys {
+				decryptedBytes = keys.Decrypt(decryptedBytes)
+			}
+			for _, keys := range g.foldedPlayerKeys {
+				decryptedBytes = keys.Decrypt(decryptedBytes)
+			}
+			playerHand = append(playerHand, NewCardFromByte(decryptedBytes[0]))
+		}
+		rank, handName := EvaluateBestHand(playerHand, g.communityCards)
+		logrus.Infof("Player %s has %s (Rank %d)", playerAddr, handName, rank)
+		if rank < bestRank {
+			bestRank = rank 
+			winnerAddr = playerAddr
+			bestHandName = handName 
+		}
+	}
+	logrus.Infof("WINNER %s with a %s!", winnerAddr, bestHandName)
+	// triggering the payout
+	g.revealedKeys = make(map[string]*CardKeys)
+	g.foldedPlayerKeys = make(map[string]*CardKeys)
+	g.setStatus(GameStatusHandComplete)
+}
+
+func (g *Game) HandleShowdownKeyReveal(from string, msg MessageRevealKeys) {
+	g.lock.Lock()
+
+	g.revealedKeys[from] = msg.Keys
+	expectedKeys := 0 
+	for _, state := range g.playerStates {
+		if state.IsActive && !state.IsFolded {
+			expectedKeys++
+		}
+	}
+	g.lock.Unlock()
+	if len(g.revealedKeys) == expectedKeys {
+		go g.ResolveWinner()
 	}
 }
 
@@ -550,6 +631,12 @@ func (g *Game) TakeAction(action PlayerAction, value int) error {
 	if action == PlayerActionRaise && value < (g.highestBet*2){
 		return fmt.Errorf("raise must be at least double the current bet")
 	}
+	if action == PlayerActionFold {
+		g.sendToPlayers(MessageRevealKeys{
+			Keys: g.deckKeys,
+		}, g.getOtherPlayers()...)
+		g.playerStates[g.listenAddr].IsFolded = true
+	}
 	g.updatePlayerState(g.listenAddr, action, value)
 	g.sendToPlayers(MessagePlayerAction{
 		Action: action,
@@ -574,34 +661,45 @@ func (g *Game) handlePlayerAction(from string, msg MessagePlayerAction) error {
 }
 
 func (g *Game) advanceToNextRound() {
-	if GameStatus(g.currentStatus.Get()) == GameStatusShowdown || GameStatus(g.currentStatus.Get()) == GameStatusHandComplete {
+	if GameStatus(g.currentStatus.Get()) == GameStatusHandComplete {
 		logrus.Info("Hand is complete. Cleaning up and starting the next round.")
 		g.StartNewHand()
 		return 
 	}
+	newStatus := g.getNextGameStatus()
+	g.setStatus(newStatus)
 	g.highestBet = 0
 	for _, state := range g.playerStates {
 		state.CurrentRoundBet = 0
 	}
-	newStatus := g.getNextGameStatus()
-	g.setStatus(newStatus)
-	communityIndices := []int{}
-	numPlayers := len(g.getReadyActivePlayers())
-	switch newStatus {
-	case GameStatusFlop:
-		start := numPlayers * 2
-		communityIndices = []int{start, start+1, start+2}
-	case GameStatusTurn:
-		communityIndices = []int{numPlayers*2 + 3}
-	case GameStatusRiver:
-		communityIndices = []int{numPlayers*2 + 4}
+	if newStatus == GameStatusShowdown {
+		logrus.Infof("Advancing to: %s", newStatus)
+		g.InitiateShowdown()
+		return 
 	}
-	g.sendToPlayers(MessageGameState{
-		Status: newStatus,
-		CommunityCards: communityIndices,
-	}, g.getOtherPlayers()...)
+	if g.listenAddr == g.rotationMap[g.currentDealerID] {
+		communityIndices := []int{}
+		numPlayers := len(g.getReadyActivePlayers())
+		switch newStatus {
+		case GameStatusFlop:
+			start := numPlayers * 2
+			communityIndices = []int{start, start+1, start+2}
+		case GameStatusTurn:
+			communityIndices = []int{numPlayers * 2 + 3}
+		case GameStatusRiver:
+			communityIndices = []int{numPlayers * 2 + 4}
+		}
+		g.sendToPlayers(MessageGameState{
+			Status: newStatus,
+			CommunityCards: communityIndices,
+		}, g.getOtherPlayers()...)
+		g.SyncState(MessageGameState{
+			Status: newStatus,
+			CommunityCards: communityIndices,
+		})
+	}
 	g.currentPlayerTurnID = g.getNextActivePlayerID(g.currentDealerID)
-	logrus.Infof("Advancing to next round: %s", newStatus)
+	logrus.Infof("Advancing to next round: %s. Turn: %d", newStatus, g.currentPlayerTurnID)
 }
 
 // #####################################
@@ -655,22 +753,6 @@ func (g *Game) getReadyPlayers() []string {
 		}
 	}
 	return ready
-}
-
-// #####################################
-// SHOWDOWN - LOGIC
-// #####################################
-
-func (g *Game) DetermineWinner() {
-	g.lock.Lock()
-	defer g.lock.Unlock()
-
-	// bestRank := int32(9999)
-	// var winnerAddr string 
-	// var winnerHandName string 
-
-	rank, handName := EvaluateBestHand(g.myHand, g.communityCards)
-	logrus.Infof("Showdown: Your hand is %s (Rank: %d)", handName, rank)
 }
 
 // #####################################

@@ -1,1 +1,3 @@
-- refactor handle get table functions in api.go
+- implement the HandleShowdownKeyRevealFunction
+- refactor advanceToNextRound function
+- write the resolveWinner function

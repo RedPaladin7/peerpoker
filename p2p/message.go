@@ -66,3 +66,13 @@ type MessageRPCResponse struct {
 	CardIndices []int
 	DecryptedData [][]byte
 }
+
+type MessageRevealKeys struct {
+	Keys *CardKeys
+}
+
+type MessageShowdownResult struct {
+	PlayerAddr string 
+	HandRank int32 
+	HandName string
+}

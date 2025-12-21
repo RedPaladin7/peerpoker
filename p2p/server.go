@@ -311,6 +311,12 @@ func (s *Server) handleMessage(msg *Message) error {
 			return s.gameState.HandleRPCRequest(msg.From, v)
 		case MessageRPCResponse:
 			s.gameState.HandleRPCResponse(msg.From, v)
+		case MessageRevealKeys:
+			if s.gameState.GetStatus() == GameStatusShowdown {
+				s.gameState.HandleShowdownKeyReveal(msg.From, v)
+			} else {
+				s.gameState.HandleFoldKeyReveal(msg.From, v)
+			}
 		default:
 			logrus.Warnf("Received unhandled message type from %s", msg.From)
 	}
@@ -351,4 +357,6 @@ func init() {
 	gob.Register(MessageShuffleStatus{})
 	gob.Register(MessageGetRPC{})
 	gob.Register(MessageRPCResponse{})
+	gob.Register(MessageRevealKeys{})
+	gob.Register(MessageShowdownResult{})
 }
