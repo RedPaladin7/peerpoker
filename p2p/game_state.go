@@ -1,6 +1,7 @@
 package p2p
 
 import (
+	"crypto/rand"
 	"fmt"
 	"math/big"
 	"sort"
@@ -136,7 +137,11 @@ func NewGame(addr string, bc chan BroadcastTo) *Game {
 		communityCards: 		make([]Card, 0, 5),			
 	}
 	g.playersList.add(addr)
-	g.playerStates[addr] = &PlayerState{ListenAddr: addr, IsActive: true}
+	g.playerStates[addr] = &PlayerState{
+		ListenAddr: addr, 
+		IsActive: true, 
+		Stack: 1000,
+	}
 
 	go g.loop()
 	return g
@@ -166,7 +171,11 @@ func (g *Game) AddPlayer(addr string) {
 		return 
 	}
 	g.playersList.add(addr)
-	g.playerStates[addr] = &PlayerState{ListenAddr: addr, IsActive: true}
+	g.playerStates[addr] = &PlayerState{
+		ListenAddr: addr, 
+		IsActive: true,
+		Stack: 1000,
+	}
 }
 
 func (g *Game) RemovePlayer(addr string) {
@@ -272,7 +281,12 @@ func (g *Game) shuffleAndEncrypt(deck [][]byte) [][]byte  {
 		newDeck[i] = g.deckKeys.Encrypt(card)
 	}
 	for i := len(newDeck) - 1; i > 0; i-- {
-		j := time.Now().UnixNano() % int64(i+1)
+		jBig, err := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
+		if err != nil {
+			logrus.Errorf("crypto rand failed: %s", err)
+			continue
+		}
+		j := jBig.Int64()
 		newDeck[i], newDeck[j] = newDeck[j], newDeck[i]
 	}
 	return newDeck
@@ -663,7 +677,7 @@ func (g *Game) handlePlayerAction(from string, msg MessagePlayerAction) error {
 func (g *Game) advanceToNextRound() {
 	if GameStatus(g.currentStatus.Get()) == GameStatusHandComplete {
 		logrus.Info("Hand is complete. Cleaning up and starting the next round.")
-		g.StartNewHand()
+		go g.StartNewHand()
 		return 
 	}
 	newStatus := g.getNextGameStatus()
