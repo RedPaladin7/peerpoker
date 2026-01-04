@@ -1,3 +1,2 @@
-- implement the HandleShowdownKeyRevealFunction
-- refactor advanceToNextRound function
-- write the resolveWinner function
+
+- instead of fixing the blind rotation logic, make it so that the mimimum number of players to play the game is 3

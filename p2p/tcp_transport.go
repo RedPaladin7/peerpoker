@@ -3,25 +3,30 @@ package p2p
 import (
 	"encoding/gob"
 	"net"
+	"sync"
 
 	"github.com/sirupsen/logrus"
 )
 
 type Peer struct {
-	conn net.Conn
-	outbound bool 
-	listenAddr string 
+	conn 		net.Conn
+	outbound 	bool 
+	listenAddr 	string 
+	encoderLock sync.Mutex
+	encoder 	*gob.Encoder
 }
 
-func (p *Peer) Send(b []byte) error {
-	_, err := p.conn.Write(b)
-	return err 
+func (p *Peer) Send(msg *Message) error {
+	p.encoderLock.Lock()
+	defer p.encoderLock.Unlock()
+	return p.encoder.Encode(msg)
 }
 
 func (p *Peer) ReadLoop(msgch chan *Message, delPeerch chan *Peer){
+	decoder := gob.NewDecoder(p.conn)
 	for {
 		msg := new(Message)
-		if err := gob.NewDecoder(p.conn).Decode(msg); err != nil {
+		if err := decoder.Decode(msg); err != nil {
 			logrus.Errorf("Peer %s: decode message error: %s", p.listenAddr, err)
 			break 
 		}
