@@ -1,2 +1,2 @@
-
-- instead of fixing the blind rotation logic, make it so that the mimimum number of players to play the game is 3
+- add function g.resetHandState
+- add function g.distributePot

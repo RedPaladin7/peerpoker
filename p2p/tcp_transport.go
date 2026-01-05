@@ -12,14 +12,14 @@ type Peer struct {
 	conn 		net.Conn
 	outbound 	bool 
 	listenAddr 	string 
-	encoderLock sync.Mutex
-	encoder 	*gob.Encoder
+	writeLock 	sync.Mutex
 }
 
-func (p *Peer) Send(msg *Message) error {
-	p.encoderLock.Lock()
-	defer p.encoderLock.Unlock()
-	return p.encoder.Encode(msg)
+func (p *Peer) Send(data []byte) error {
+	p.writeLock.Lock()
+	defer p.writeLock.Unlock()
+	_, err := p.conn.Write(data)
+	return err
 }
 
 func (p *Peer) ReadLoop(msgch chan *Message, delPeerch chan *Peer){
