@@ -1,2 +1,1 @@
-- add function g.resetHandState
-- add function g.distributePot
+- implementation of handleGetHandHistory function in the api file
