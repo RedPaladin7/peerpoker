@@ -1,1 +1,2 @@
 - implementation of handleGetHandHistory function in the api file
+- check setInterval function in useGameState hook
