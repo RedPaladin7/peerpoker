@@ -61,8 +61,8 @@ func (s *APIServer) Run() {
 	r.HandleFunc("/api/bet", makeHTTPHandlerFunc(s.handlePlayerBet)).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/raise", makeHTTPHandlerFunc(s.handlePlayerRaise)).Methods("POST", "OPTIONS")
 
-	r.HandleFunc("api/table", makeHTTPHandlerFunc(s.handleGetTable)).Methods("GET", "OPTIONS")
-	r.HandleFunc("api/players", makeHTTPHandlerFunc(s.handleGetPlayers)).Methods("GET", "OPTIONS")
+	r.HandleFunc("/api/table", makeHTTPHandlerFunc(s.handleGetTable)).Methods("GET", "OPTIONS")
+	r.HandleFunc("/api/players", makeHTTPHandlerFunc(s.handleGetPlayers)).Methods("GET", "OPTIONS")
 
 	r.HandleFunc("/api/health", makeHTTPHandlerFunc(s.handleHealth)).Methods("GET", "OPTIONS")
 
@@ -76,7 +76,7 @@ func (s *APIServer) Run() {
 type TableStateResponse struct {
 	Status 			string 				`json:"status"`
 	MyHand 			[]CardResponse 		`json:"myHand"`
-	CommunitCards 	[]CardResponse 		`json:"community_cards"`
+	CommunityCards 	[]CardResponse 		`json:"community_cards"`
 	Pot 			int 				`json:"pot"`
 	HighestBet 		int 				`json:"highest_bet"`
 	MinRaise 		int 				`json:"min_raise"`
@@ -88,13 +88,13 @@ type TableStateResponse struct {
 	DealerID 		int 				`json:"dealer_id"`
 	SmallBlind 		int 				`json:"small_blind"`
 	BigBlind 		int 				`json:"big_blind"`
-	TimeBank 		int 				`json:'time_bank,omitempty"`
+	TimeBank 		int 				`json:"time_bank,omitempty"`
 }
 
 type CardResponse struct {
 	Suit 	string 	`json:"suit"`
 	Value 	int 	`json:"value"`
-	Display string 	`json"display"`
+	Display string 	`json:"display"`
 }
 
 type PlayerStateResponse struct {
@@ -138,12 +138,15 @@ func (s *APIServer) handleGetTable(w http.ResponseWriter, r *http.Request) error
 		actionStrings[i] = action.String()
 	}
 
-	myHandResp := make([]CardResponse, len(s.game.myHand))
-	for i, card := range s.game.myHand {
-		myHandResp[i] = CardResponse{
-			Suit: card.Suit.String(),
-			Value: card.Value,
-			Display: card.String(),
+	myHandResp := make([]CardResponse, 0) 
+	if len(s.game.myHand) > 0 {
+		myHandResp = make([]CardResponse, len(s.game.myHand))
+		for i, card := range s.game.myHand {
+			myHandResp[i] = CardResponse{
+				Suit: card.Suit.String(),
+				Value: card.Value,
+				Display: card.String(),
+			}
 		}
 	}
 	communityCardResp := make([]CardResponse, len(s.game.communityCards))
@@ -165,7 +168,7 @@ func (s *APIServer) handleGetTable(w http.ResponseWriter, r *http.Request) error
 	resp := TableStateResponse{
 		Status: 		s.game.GetStatus().String(),
 		MyHand: 		myHandResp,
-		CommunitCards: 	communityCardResp,
+		CommunityCards: 	communityCardResp,
 		Pot: 			s.game.currentPot,
 		HighestBet: 	s.game.highestBet,
 		MinRaise: 		minRaise,
