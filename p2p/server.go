@@ -89,7 +89,7 @@ func (s *Server) Start() {
 		"p2p-port": s.ListenAddr,
 		"variant": s.GameVariant,
 		"maxPlayers": s.MaxPlayers,
-	}).Info("Staring P2P game server...")
+}).Info("Staring P2P game server...")
 	s.transport.ListenAndAccept()
 }
 
@@ -304,6 +304,9 @@ func (s *Server) handleMessage(msg *Message) error {
 			return s.handlePeerList(v)
 		case MessageEncDeck:
 			return s.handleMsgEncDeck(msg.From, v)
+		case MessageShuffleStatus:
+			logrus.Infof("Received shuffle status from %s", msg.From)
+			return s.gameState.ShuffleAndEncrypt(msg.From, v.Deck)
 		case MessageReady:
 			return s.handleMsgReady(msg.From)
 		case MessagePlayerAction:
@@ -363,4 +366,5 @@ func init() {
 	gob.Register(MessageRPCResponse{})
 	gob.Register(MessageRevealKeys{})
 	gob.Register(MessageShowdownResult{})
+	gob.Register(MessageShuffleStatus{})
 }

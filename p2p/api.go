@@ -54,6 +54,8 @@ func (s *APIServer) Run() {
 	r := mux.NewRouter()
 	r.Use(enableCORS)
 
+	r.HandleFunc("/api/connect", makeHTTPHandlerFunc(s.handleConnect)).Methods("POST", "OPTIONS")
+
 	r.HandleFunc("/api/ready", makeHTTPHandlerFunc(s.handlePlayerReady)).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/fold", makeHTTPHandlerFunc(s.handlePlayerFold)).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/check", makeHTTPHandlerFunc(s.handlePlayerCheck)).Methods("POST", "OPTIONS")
