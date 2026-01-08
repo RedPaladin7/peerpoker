@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
@@ -41,12 +42,14 @@ func enableCORS(next http.Handler) http.Handler {
 type APIServer struct {
 	listenAddr string 
 	game 	   *Game
+	server 	   *Server
 }
 
-func NewAPIServer(listenAddr string, game *Game) *APIServer {
+func NewAPIServer(listenAddr string, game *Game, server *Server) *APIServer {
 	return &APIServer{
 		game: game,
 		listenAddr: listenAddr,
+		server: server,
 	}
 }
 
@@ -79,6 +82,12 @@ func (s *APIServer) Run() {
 
 type ConnectRequest struct {
 	Addr string `json:"addr"`
+}
+
+type ConnectResponse struct {
+	Success 	bool 	`json:"success"`
+	Message 	string 	`json:"message"`
+	Peers 		int 
 }
 
 type TableStateResponse struct {
@@ -134,7 +143,42 @@ func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) error 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return err
 	}
-	return s.game.ConnectToPeer(req.Addr)
+	if req.Addr == "" {
+		return fmt.Errorf("peer address cannot be empty")
+	}
+	logrus.Infof("API: Attempting to connect to peer: %s", req.Addr)
+
+	if _, ok := s.server.GetPeer(req.Addr); ok {
+		return JSON(w, http.StatusOK, ConnectResponse{
+			Success: true, 
+			Message: "Already connected to this peer",
+			Peers: len(s.server.Peers()),
+		})
+	}
+
+	resultCh := make(chan error, 1)
+
+	go func() {
+		err := s.server.Connect(req.Addr)
+		resultCh <- err
+	}()
+
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			logrus.Errorf("Failed to connect to peer %s: %s", req.Addr, err)
+			return fmt.Errorf("Connection failed: %s", err)
+		}
+		time.Sleep(500 * time.Millisecond)
+
+		return JSON(w, http.StatusOK, ConnectResponse{
+			Success: true,
+			Message: "Successfully connected to peer",
+			Peers: len(s.server.Peers()),
+		})
+	case <-time.After(5*time.Second):
+		return fmt.Errorf("connection timeour after 5 seconds")
+	}
 }
 
 func (s *APIServer) handleHealth(w http.ResponseWriter, r *http.Request) error {

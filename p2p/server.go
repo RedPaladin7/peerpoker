@@ -74,7 +74,7 @@ func NewServer(cfg ServerConfig) *Server {
 	tr.DelPeer = s.delPeer
 
 	go func(s *Server){
-		apiServer := NewAPIServer(cfg.APIListenAddr, s.gameState)
+		apiServer := NewAPIServer(cfg.APIListenAddr, s.gameState, s)
 		apiServer.Run()
 		logrus.WithFields(logrus.Fields{
 			"listenAddr": cfg.APIListenAddr,
@@ -167,10 +167,6 @@ func (s *Server) loop() {
 					logrus.Errorf("message handler error: %s", err)
 				}
 			}()
-		case addr := <-s.gameState.connectPeerCh:
-			if err := s.Connect(addr); err != nil {
-				logrus.Errorf("Failed to connect to peer via API: %s", err)
-			}
 		}
 	}
 }

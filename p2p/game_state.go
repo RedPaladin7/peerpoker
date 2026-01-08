@@ -130,7 +130,6 @@ type Game struct {
 	myHand 				[]Card
 	communityCards 		[]Card
 	sidePots 			[]SidePot
-	connectPeerCh		chan string
 }
 
 func NewGame(addr string, bc chan BroadcastTo) *Game {
@@ -148,8 +147,7 @@ func NewGame(addr string, bc chan BroadcastTo) *Game {
 		revealedKeys: 			make(map[string]*CardKeys),
 		myHand: 				make([]Card, 0, 2),
 		communityCards: 		make([]Card, 0, 5),		
-		sidePots:				[]SidePot{},
-		connectPeerCh: 			make(chan string, 10),		
+		sidePots:				[]SidePot{},	
 	}
 	g.playersList.add(addr)
 	g.playerStates[addr] = &PlayerState{
@@ -242,11 +240,6 @@ func (g *Game) SetReady(from string) {
 	if len(g.getReadyPlayers()) >= 2 && GameStatus(g.currentStatus.Get()) == GameStatusWaiting {
 		g.StartNewHand()
 	}
-}
-
-func (g *Game) ConnectToPeer(addr string) error {
-	g.connectPeerCh <- addr
-	return nil
 }
 
 func (g *Game) StartNewHand() {
