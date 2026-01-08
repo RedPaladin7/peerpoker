@@ -66,6 +66,8 @@ func (s *APIServer) Run() {
 
 	r.HandleFunc("/api/health", makeHTTPHandlerFunc(s.handleHealth)).Methods("GET", "OPTIONS")
 
+
+
 	logrus.WithFields(logrus.Fields{
 		"addr": s.listenAddr,
 	}).Info("API Server starting...")
@@ -73,9 +75,13 @@ func (s *APIServer) Run() {
 	http.ListenAndServe(s.listenAddr, r)
 }
 
+type ConnectRequest struct {
+	Addr string `json:"addr"`
+}
+
 type TableStateResponse struct {
 	Status 			string 				`json:"status"`
-	MyHand 			[]CardResponse 		`json:"myHand"`
+	MyHand 			[]CardResponse 		`json:"my_hand"`
 	CommunityCards 	[]CardResponse 		`json:"community_cards"`
 	Pot 			int 				`json:"pot"`
 	HighestBet 		int 				`json:"highest_bet"`
@@ -119,6 +125,14 @@ type PlayerResponse struct {
 
 type ActionRequest struct {
 	Value	int		`json:"value,omitempty"`
+}
+
+func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) error {
+	var req ConnectRequest 
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return err
+	}
+	return s.game.ConnectToPeer(req.Addr)
 }
 
 func (s *APIServer) handleHealth(w http.ResponseWriter, r *http.Request) error {

@@ -19,7 +19,7 @@ const (
 
 func main() {
 	var (
-		p2pPort = flag.String("p2pPort", defaultP2PPort, "P2P network port")
+		p2pPort = flag.String("p2p-port", defaultP2PPort, "P2P network port")
 		apiPort = flag.String("api-port", defaultAPIPort, "HTTP API port")
 		connectTo = flag.String("connect", "", "Connect to existing peer (e.g., localhost: 3000)")
 		maxPlayers = flag.Int("max-players", 6, "Maximum number of players")

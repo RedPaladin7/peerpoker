@@ -26,6 +26,16 @@ export function useGameState(
         connected: false
     })
     const [interval, setInterval] = useState(pollingInterval)
+
+    useEffect(()=>{
+        if (typeof window !== "undefined") {
+            const params = new URLSearchParams(window.location.search)
+            const port = params.get("port") || "8080"
+            apiClient.setBaseURL(`http://localhost:${port}`)
+            console.log(`Fronted connected to Go API on port: ${port}`)
+        }
+    }, [])
+
     const fetchGameState = useCallback(async() => {
         try {
             const [tableData, playersData] = await Promise.all([
